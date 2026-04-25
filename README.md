@@ -1,17 +1,26 @@
 # Be More Agent 🤖
-**A Customizable, Offline-First AI Agent for Raspberry Pi**
+**A Customizable, Local AI Agent for Raspberry Pi**
 
 [![Watch the Demo](https://img.youtube.com/vi/l5ggH-YhuAw/maxresdefault.jpg)](https://youtu.be/l5ggH-YhuAw)
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi-red) ![License](https://img.shields.io/badge/License-MIT-green)
 
-This project turns a Raspberry Pi into a fully functional, conversational AI agent. Unlike cloud-based assistants, this agent runs **100% locally** on your device. It listens for a wake word, processes speech, "thinks" using a local Large Language Model (LLM), and speaks back with a low-latency neural voice—all while displaying reactive face animations.
+This project turns a Raspberry Pi into a fully functional, conversational AI agent. It listens for a wake word, processes speech, "thinks" using a Large Language Model, and speaks back with a low-latency neural voice—all while displaying reactive face animations.
+
+The agent supports two LLM backends that you can switch with a single config key:
+
+| Provider | Key | Requirements | Internet? |
+|---|---|---|---|
+| **Ollama** (default) | `"ollama"` | Ollama daemon + local model | No — fully offline |
+| **Claude Code CLI** | `"claude-cli"` | `claude` CLI + `claude login` | Yes |
 
 **It is designed as a blank canvas:** You can easily swap the face images and sound effects to create your own character!
 
 ## ✨ Features
 
-* **100% Local Intelligence**: Powered by **Ollama** (LLM) and **Whisper.cpp** (Speech-to-Text). No API fees, no cloud data usage.
+* **Dual LLM Providers**: Switch between local **Ollama** (offline) and **Claude Code CLI** (Anthropic Claude) with one line in `config.json`.
+* **Offline-First with Ollama**: Powered by **Ollama** and **Whisper.cpp**. No API fees, no cloud data usage when using the default provider.
+* **Claude Code CLI Support**: Authenticate once with `claude login` and the agent uses your local Claude installation — no `ANTHROPIC_API_KEY` needed.
 * **Open Source Wake Word**: Wakes up to your custom model using **OpenWakeWord** (Offline & Free). No access keys required.
 * **Hardware-Aware Audio**: Automatically detects your microphone's sample rate and resamples audio on the fly to prevent ALSA errors.
 * **Smart Web Search**: Uses DuckDuckGo to find real-time news and information when the LLM doesn't know the answer.
@@ -65,16 +74,28 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install git -y
 ```
 
-### 2. Install Ollama
-This agent relies on [Ollama](https://ollama.com) to run the brain.
+### 2. Choose your LLM provider
+
+#### Option A — Ollama (offline, default)
+
+Install [Ollama](https://ollama.com) and pull the required models:
 ```bash
-curl -fsSL https://ollama.com/install.sh| sh
-```
-*Pull the required models:*
-```bash
-ollama pull gemma:2b
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull gemma3:1b
 ollama pull moondream
 ```
+
+#### Option B — Claude Code CLI
+
+Install the Claude Code CLI and authenticate:
+```bash
+npm install -g @anthropic-ai/claude-code
+claude login
+```
+
+`claude login` stores credentials locally. The agent reads them automatically — no environment variables required.
+
+> **Note:** The Claude Code CLI requires an internet connection on each request. Speech-to-text (Whisper.cpp) and TTS (Piper) still run fully offline.
 
 ### 3. Clone & Setup
 ```bash
@@ -83,7 +104,7 @@ cd be-more-agent
 chmod +x setup.sh
 ./setup.sh
 ```
-*The setup script will install system libraries, create necessary folders, download Piper TTS, and set up the Python virtual environment.*
+*The setup script installs system libraries, creates necessary folders, downloads Piper TTS, and sets up the Python virtual environment.*
 
 ### 4. Configure the Wake Word
 The setup script downloads a default wake word ("Hey Jarvis"). To use your own:
@@ -101,10 +122,27 @@ python agent.py
 
 ## 📂 Configuration (`config.json`)
 
-You can modify the hardware behavior and personality in `config.json`. The `agent.py` script creates this on the first run if it doesn't exist, but you can create it manually:
+You can modify the hardware behaviour and personality in `config.json`. The `agent.py` script creates this on first run if it doesn't exist, but you can create it manually.
+
+### All options
+
+| Key | Default | Description |
+|---|---|---|
+| `llm_provider` | `"ollama"` | LLM backend: `"ollama"` or `"claude-cli"` |
+| `text_model` | `"gemma3:1b"` | Model name passed to the provider (see below) |
+| `vision_model` | `"moondream"` | Ollama vision model for camera queries |
+| `voice_model` | `"piper/en_GB-semaine-medium.onnx"` | Piper TTS voice model path |
+| `chat_memory` | `true` | Persist conversation history across sessions |
+| `camera_rotation` | `0` | Camera rotation in degrees: `0`, `90`, `180`, `270` |
+| `system_prompt_extras` | `""` | Extra instructions appended to the system prompt |
+| `input_device` | `null` | Microphone device name (`null` = system default) |
+| `input_sample_rate` | `null` | Force a sample rate in Hz (`null` = auto-detect) |
+
+### Example: Ollama (offline)
 
 ```json
 {
+    "llm_provider": "ollama",
     "text_model": "gemma3:1b",
     "vision_model": "moondream",
     "voice_model": "piper/en_GB-semaine-medium.onnx",
@@ -113,6 +151,25 @@ You can modify the hardware behavior and personality in `config.json`. The `agen
     "system_prompt_extras": "You are a helpful robot assistant. Keep responses short and cute."
 }
 ```
+
+### Example: Claude Code CLI
+
+```json
+{
+    "llm_provider": "claude-cli",
+    "text_model": "claude-haiku-4-5-20251001",
+    "vision_model": "moondream",
+    "voice_model": "piper/en_GB-semaine-medium.onnx",
+    "chat_memory": true,
+    "camera_rotation": 0,
+    "system_prompt_extras": ""
+}
+```
+
+**`text_model` behaviour with `claude-cli`:**
+- If the value starts with `claude-` (e.g. `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`), it is passed as `--model` to the CLI.
+- If the value is an Ollama model name (e.g. `gemma3:1b`), the `--model` flag is omitted and the CLI uses its own default model from `claude login`.
+- Vision queries always use Ollama's `vision_model` regardless of the provider setting.
 
 ---
 
