@@ -67,17 +67,112 @@ DEFAULT_CONFIG = {
     "camera_rotation": 0,
     "system_prompt_extras": "",
     "input_device": None,
-    "input_sample_rate": None
+    "input_sample_rate": None,
+    "llm_provider": "ollama"
 }
 
 # LLM SETTINGS
 OLLAMA_OPTIONS = {
-    'keep_alive': '-1',     
+    'keep_alive': '-1',
     'num_thread': 4,
-    'temperature': 0.7,     
+    'temperature': 0.7,
     'top_k': 40,
     'top_p': 0.9
 }
+
+# =========================================================================
+# LLM PROVIDER ABSTRACTION
+# Supports "ollama" (local, offline) and "claude-cli" (Claude Code CLI).
+# Set "llm_provider" in config.json to switch.
+# =========================================================================
+
+class OllamaProvider:
+    def warmup(self, model):
+        ollama.generate(model=model, prompt="", keep_alive=-1)
+
+    def shutdown(self, model):
+        ollama.generate(model=model, prompt="", keep_alive=0)
+
+    def chat_stream(self, model, messages, options):
+        """Yields content strings from a streaming Ollama chat."""
+        for chunk in ollama.chat(model=model, messages=messages,
+                                  stream=True, options=options):
+            yield chunk['message']['content']
+
+    def chat(self, model, messages, options):
+        resp = ollama.chat(model=model, messages=messages,
+                           stream=False, options=options)
+        return resp['message']['content']
+
+
+class ClaudeCLIProvider:
+    """Calls the local `claude` CLI (Claude Code) as a subprocess.
+    Requires ANTHROPIC_API_KEY and an internet connection.
+    Vision prompts are not supported and will fall back to Ollama.
+    """
+
+    _CLI = "claude"
+
+    @classmethod
+    def available(cls):
+        import shutil
+        return shutil.which(cls._CLI) is not None
+
+    def warmup(self, model):
+        pass  # No model preloading needed for the CLI.
+
+    def shutdown(self, model):
+        pass
+
+    def _build_prompt(self, messages):
+        """Flatten an OpenAI-style message list into a plain-text prompt."""
+        parts = []
+        for m in messages:
+            role = m.get("role", "").lower()
+            content = m.get("content", "")
+            if role == "system":
+                parts.append(f"[System: {content}]")
+            elif role == "user":
+                parts.append(f"User: {content}")
+            elif role == "assistant":
+                parts.append(f"Assistant: {content}")
+        parts.append("Assistant:")
+        return "\n\n".join(parts)
+
+    def chat_stream(self, model, messages, options):
+        """Stream tokens via `claude --output-format stream-json -p <prompt>`."""
+        prompt = self._build_prompt(messages)
+        cmd = [self._CLI, "--output-format", "stream-json",
+               "--model", model, "-p", prompt]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True)
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                if event.get("type") == "text":
+                    yield event["text"]
+            except json.JSONDecodeError:
+                yield line  # plain-text fallback for older CLI versions
+        proc.wait()
+
+    def chat(self, model, messages, options):
+        return "".join(self.chat_stream(model, messages, options))
+
+
+def make_llm_provider(config):
+    name = config.get("llm_provider", "ollama")
+    if name == "claude-cli":
+        p = ClaudeCLIProvider()
+        if p.available():
+            print(f"LLM provider: Claude Code CLI (model: {config.get('text_model')})", flush=True)
+            return p
+        print("WARNING: 'claude' CLI not found — falling back to Ollama.", flush=True)
+    print(f"LLM provider: Ollama (model: {config.get('text_model')})", flush=True)
+    return OllamaProvider()
+
 
 def load_config():
     config = DEFAULT_CONFIG.copy()
@@ -93,6 +188,7 @@ def load_config():
 CURRENT_CONFIG = load_config()
 TEXT_MODEL = CURRENT_CONFIG["text_model"]
 VISION_MODEL = CURRENT_CONFIG["vision_model"]
+LLM = make_llm_provider(CURRENT_CONFIG)
 
 def resolve_input_device(config):
     requested = config.get("input_device")
@@ -308,7 +404,7 @@ class BotGUI:
         self.save_chat_history()
         
         try:
-            ollama.generate(model=TEXT_MODEL, prompt="", keep_alive=0)
+            LLM.shutdown(TEXT_MODEL)
         except: pass
         try:
             sd.stop()
@@ -556,7 +652,7 @@ class BotGUI:
     def warm_up_logic(self):
         self.set_state(BotStates.WARMUP, "Warming up brains...")
         try:
-            ollama.generate(model=TEXT_MODEL, prompt="", keep_alive=-1)
+            LLM.warmup(TEXT_MODEL)
         except Exception as e:
             print(f"Failed to load {TEXT_MODEL}: {e}", flush=True)
         self.play_sound(self.get_random_sound(greeting_sounds_dir))
@@ -835,13 +931,10 @@ class BotGUI:
         sentence_buffer = "" 
         
         try:
-            stream = ollama.chat(model=model_to_use, messages=messages, stream=True, options=OLLAMA_OPTIONS)
-            
             is_action_mode = False
-            
-            for chunk in stream:
-                if self.interrupted.is_set(): break 
-                content = chunk['message']['content']
+
+            for content in LLM.chat_stream(model_to_use, messages, OLLAMA_OPTIONS):
+                if self.interrupted.is_set(): break
                 full_response_buffer += content
                 
                 if '{"' in content or "action:" in content.lower():
@@ -921,8 +1014,7 @@ class BotGUI:
                         self.set_state(BotStates.THINKING, "Reading...")
                         self.thinking_sound_active.set()
                         
-                        final_resp = ollama.chat(model=model_to_use, messages=summary_prompt, stream=False, options=OLLAMA_OPTIONS)
-                        final_text = final_resp['message']['content']
+                        final_text = LLM.chat(model_to_use, summary_prompt, OLLAMA_OPTIONS)
                         
                         self.thinking_sound_active.clear()
                         self.set_state(BotStates.SPEAKING, "Speaking...", cam_path=img_path)
