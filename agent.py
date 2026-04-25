@@ -140,10 +140,16 @@ class ClaudeCLIProvider:
         return "\n\n".join(parts)
 
     def chat_stream(self, model, messages, options):
-        """Stream tokens via `claude --output-format stream-json -p <prompt>`."""
+        """Stream tokens via `claude --output-format stream-json -p <prompt>`.
+
+        Uses auth from `claude login` — no API key needed.
+        Only passes --model when the name looks like a Claude model ID;
+        otherwise the CLI uses its own default model.
+        """
         prompt = self._build_prompt(messages)
-        cmd = [self._CLI, "--output-format", "stream-json",
-               "--model", model, "-p", prompt]
+        cmd = [self._CLI, "--output-format", "stream-json", "-p", prompt]
+        if model.startswith("claude-"):
+            cmd += ["--model", model]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True)
         for line in proc.stdout:
