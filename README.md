@@ -41,7 +41,14 @@
 > This opens a browser-based OAuth flow and stores credentials locally.
 > No `ANTHROPIC_API_KEY` environment variable is needed — the CLI handles auth automatically.
 >
-> **Step 3 — Update `config.json`**
+> **Sep 3 - Clone & Setup**
+> ```bash
+> git clone https://github.com/rubengarciam/be-more-agent.git
+> cd be-more-agent
+> chmod +x setup.sh
+> ./setup.sh
+> ```
+> **Step 4 — Update `config.json`**
 >
 > Set `llm_provider` to `"claude-cli"` and choose a Claude model for `text_model`:
 > ```json
@@ -53,7 +60,7 @@
 > Any model ID starting with `"claude-"` is forwarded to the CLI via `--model`.
 > If `text_model` is not a Claude model ID, the CLI uses the model set during `claude login`.
 >
-> **Step 4 — Run the agent**
+> **Step 5 — Run the agent**
 >
 > ```bash
 > source venv/bin/activate
