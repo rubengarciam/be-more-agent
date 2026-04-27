@@ -18,13 +18,51 @@
 > - `--model` is only passed to the `claude` CLI when `text_model` starts with `"claude-"`;
 >   otherwise the CLI uses its own default model from `claude login`.
 >
-> To switch to the Claude Code CLI, update `config.json`:
+> ### Using Claude Code CLI instead of Ollama
+>
+> Follow these steps to run the agent with Claude as the LLM backend:
+>
+> **Step 1 — Install the Claude Code CLI**
+>
+> On Linux / Raspberry Pi OS (requires Node.js 18+):
+> ```bash
+> npm install -g @anthropic-ai/claude-code
+> ```
+> Verify the installation:
+> ```bash
+> claude --version
+> ```
+>
+> **Step 2 — Authenticate**
+>
+> ```bash
+> claude login
+> ```
+> This opens a browser-based OAuth flow and stores credentials locally.
+> No `ANTHROPIC_API_KEY` environment variable is needed — the CLI handles auth automatically.
+>
+> **Step 3 — Update `config.json`**
+>
+> Set `llm_provider` to `"claude-cli"` and choose a Claude model for `text_model`:
 > ```json
 > {
 >   "llm_provider": "claude-cli",
 >   "text_model": "claude-haiku-4-5-20251001"
 > }
 > ```
+> Any model ID starting with `"claude-"` is forwarded to the CLI via `--model`.
+> If `text_model` is not a Claude model ID, the CLI uses the model set during `claude login`.
+>
+> **Step 4 — Run the agent**
+>
+> ```bash
+> source venv/bin/activate
+> python agent.py
+> ```
+> The agent prints `LLM provider: Claude Code CLI` on startup to confirm the switch.
+> If the `claude` binary is not found on `$PATH`, it automatically falls back to Ollama.
+>
+> > **Note:** Vision queries (camera input) are not supported by the Claude CLI provider and will fall back to Ollama's `moondream` model. An internet connection is required when using `claude-cli`.
 
 ---
 
